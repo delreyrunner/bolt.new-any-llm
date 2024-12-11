@@ -55,6 +55,12 @@ interface BaseChatProps {
   setUploadedFiles?: (files: File[]) => void;
   imageDataList?: string[];
   setImageDataList?: (dataList: string[]) => void;
+  userId: string | null;
+  chatId?: string;
+  urlId?: string;
+  onChatCreated?: (chatId: string) => void;
+  onChatUpdated?: (chatId: string) => void;
+  onChatDeleted?: (chatId: string) => void;
 }
 
 export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
@@ -84,6 +90,12 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
       imageDataList = [],
       setImageDataList,
       messages,
+      userId,
+      chatId,
+      urlId,
+      onChatCreated,
+      onChatUpdated,
+      onChatDeleted,
     },
     ref,
   ) => {
@@ -569,7 +581,15 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                 handleSendMessage?.(event, messageInput);
               })}
           </div>
-          <ClientOnly>{() => <Workbench chatStarted={chatStarted} isStreaming={isStreaming} />}</ClientOnly>
+          <ClientOnly>
+            {() => (
+              <Workbench
+                chatStarted={chatStarted}
+                isStreaming={isStreaming}
+                userId={userId}
+              />
+            )}
+          </ClientOnly>
         </div>
       </div>
     );

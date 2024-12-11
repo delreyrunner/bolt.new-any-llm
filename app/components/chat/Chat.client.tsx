@@ -19,6 +19,7 @@ import { BaseChat } from './BaseChat';
 import Cookies from 'js-cookie';
 import type { ProviderInfo } from '~/utils/types';
 import { debounce } from '~/utils/debounce';
+import { useUserId } from '~/hooks/useUserId';
 
 const toastAnimation = cssTransition({
   enter: 'animated fadeInRight',
@@ -32,6 +33,7 @@ export function Chat() {
 
   const { ready, initialMessages, storeMessageHistory, importChat, exportChat } = useChatHistory();
   const title = useStore(description);
+  const userId = useUserId();
 
   return (
     <>
@@ -42,6 +44,7 @@ export function Chat() {
           exportChat={exportChat}
           storeMessageHistory={storeMessageHistory}
           importChat={importChat}
+          userId={userId}
         />
       )}
       <ToastContainer
@@ -81,10 +84,11 @@ interface ChatProps {
   importChat: (description: string, messages: Message[]) => Promise<void>;
   exportChat: () => void;
   description?: string;
+  userId: string | null;
 }
 
 export const ChatImpl = memo(
-  ({ description, initialMessages, storeMessageHistory, importChat, exportChat }: ChatProps) => {
+  ({ description, initialMessages, storeMessageHistory, importChat, exportChat, userId }: ChatProps) => {
     useShortcuts();
 
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -305,6 +309,7 @@ export const ChatImpl = memo(
       <BaseChat
         ref={animationScope}
         textareaRef={textareaRef}
+        userId={userId}
         input={input}
         showChat={showChat}
         chatStarted={chatStarted}

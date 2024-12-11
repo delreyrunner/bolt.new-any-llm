@@ -8,6 +8,7 @@ import { Chat } from '~/components/chat/Chat.client';
 import { useGit } from '~/lib/hooks/useGit';
 import { useChatHistory } from '~/lib/persistence';
 import { createCommandsMessage, detectProjectCommands } from '~/utils/projectCommands';
+import { useUserId } from '~/hooks/useUserId';
 
 const IGNORE_PATTERNS = [
   'node_modules/**',
@@ -38,6 +39,7 @@ export function GitUrlImport() {
   const { ready: historyReady, importChat } = useChatHistory();
   const { ready: gitReady, gitClone } = useGit();
   const [imported, setImported] = useState(false);
+  const userId = useUserId();
 
   const importRepo = async (repoUrl?: string) => {
     if (!gitReady && !historyReady) {
@@ -113,5 +115,5 @@ ${file.content}
     setImported(true);
   }, [searchParams, historyReady, gitReady, imported]);
 
-  return <ClientOnly fallback={<BaseChat />}>{() => <Chat />}</ClientOnly>;
+  return <ClientOnly fallback={<BaseChat />}>{() => <Chat userId={userId} />}</ClientOnly>;
 }

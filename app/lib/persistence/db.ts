@@ -12,15 +12,28 @@ export async function openDatabase(): Promise<IDBDatabase | undefined> {
   }
 
   return new Promise((resolve) => {
-    const request = indexedDB.open('boltHistory', 1);
+    const request = indexedDB.open('boltHistory', 2);
 
     request.onupgradeneeded = (event: IDBVersionChangeEvent) => {
       const db = (event.target as IDBOpenDBRequest).result;
+
+      if (!db.objectStoreNames.contains('users')) {
+        const store = db.createObjectStore('users', { keyPath: 'id' });
+        store.createIndex('id', 'id', { unique: true });
+      }
 
       if (!db.objectStoreNames.contains('chats')) {
         const store = db.createObjectStore('chats', { keyPath: 'id' });
         store.createIndex('id', 'id', { unique: true });
         store.createIndex('urlId', 'urlId', { unique: true });
+        store.createIndex('userId', 'userId', { unique: false });
+      }
+
+      if (!db.objectStoreNames.contains('userProjects')) {
+        const store = db.createObjectStore('userProjects', { keyPath: 'id' });
+        store.createIndex('id', 'id', { unique: true });
+        store.createIndex('userId', 'userId', { unique: false });
+        store.createIndex('projectId', 'projectId', { unique: true });
       }
     };
 
@@ -50,6 +63,7 @@ export async function setMessages(
   db: IDBDatabase,
   id: string,
   messages: Message[],
+  userId: string | null,
   urlId?: string,
   description?: string,
   timestamp?: string,
@@ -67,6 +81,7 @@ export async function setMessages(
       id,
       messages,
       urlId,
+      userId,
       description,
       timestamp: timestamp ?? new Date().toISOString(),
     });
@@ -77,7 +92,15 @@ export async function setMessages(
 }
 
 export async function getMessages(db: IDBDatabase, id: string): Promise<ChatHistoryItem> {
-  return (await getMessagesById(db, id)) || (await getMessagesByUrlId(db, id));
+  const chat = await getMessagesById(db, id) || await getMessagesByUrlId(db, id);
+  if (!chat) return null;
+
+  // Only return the chat if it has no userId (legacy) or if it matches the current user
+  const currentUserId = workbenchStore.getCurrentUserId();
+  if (!chat.userId || chat.userId === currentUserId) {
+    return chat;
+  }
+  return null;
 }
 
 export async function getMessagesByUrlId(db: IDBDatabase, id: string): Promise<ChatHistoryItem> {
@@ -212,6 +235,7 @@ export async function createChatFromMessages(
     db,
     newId,
     messages,
+    null, // Use null as the userId for now
     newUrlId, // Use the new urlId
     description,
   );
@@ -230,5 +254,144 @@ export async function updateChatDescription(db: IDBDatabase, id: string, descrip
     throw new Error('Description cannot be empty');
   }
 
-  await setMessages(db, id, chat.messages, chat.urlId, description, chat.timestamp);
+  await setMessages(db, id, chat.messages, chat.userId, chat.urlId, description, chat.timestamp);
+}
+
+export interface User {
+  id: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export async function createUser(db: IDBDatabase, userId: string): Promise<User> {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('users', 'readwrite');
+    const store = transaction.objectStore('users');
+
+    const now = Date.now();
+    const user: User = {
+      id: userId,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    transaction.oncomplete = () => {
+      logger.info(`Successfully created user ${userId}`);
+      resolve(user);
+    };
+
+    transaction.onerror = () => {
+      logger.error(`Failed to create user ${userId}: ${transaction.error}`);
+      reject(transaction.error);
+    };
+
+    store.put(user);
+  });
+}
+
+export async function getUser(db: IDBDatabase, userId: string): Promise<User | null> {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('users', 'readonly');
+    const store = transaction.objectStore('users');
+    const request = store.get(userId);
+
+    request.onsuccess = () => resolve(request.result as User || null);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function ensureUser(db: IDBDatabase, userId: string): Promise<User> {
+  try {
+    logger.info(`Ensuring user exists: ${userId}`);
+    const existingUser = await getUser(db, userId);
+    if (existingUser) {
+      logger.info(`User ${userId} already exists`);
+      return existingUser;
+    }
+    logger.info(`Creating new user: ${userId}`);
+    return await createUser(db, userId);
+  } catch (error) {
+    logger.error(`Failed to ensure user ${userId}: ${error}`);
+    throw error;
+  }
+}
+
+export interface UserProject {
+  id: string;
+  userId: string;
+  projectId: string;
+  name: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export async function createUserProject(
+  db: IDBDatabase,
+  userId: string,
+  projectId: string,
+  name: string,
+): Promise<UserProject> {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('userProjects', 'readwrite');
+    const store = transaction.objectStore('userProjects');
+    
+    const project: UserProject = {
+      id: `${userId}_${projectId}`,
+      userId,
+      projectId,
+      name,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    const request = store.add(project);
+    request.onsuccess = () => resolve(project);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function getUserProjects(
+  db: IDBDatabase,
+  userId: string,
+): Promise<UserProject[]> {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('userProjects', 'readonly');
+    const store = transaction.objectStore('userProjects');
+    const index = store.index('userId');
+    const request = index.getAll(userId);
+
+    request.onsuccess = () => resolve(request.result as UserProject[]);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function updateUserProject(
+  db: IDBDatabase,
+  project: UserProject,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('userProjects', 'readwrite');
+    const store = transaction.objectStore('userProjects');
+    
+    project.updatedAt = Date.now();
+    const request = store.put(project);
+    
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function deleteUserProject(
+  db: IDBDatabase,
+  userId: string,
+  projectId: string,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('userProjects', 'readwrite');
+    const store = transaction.objectStore('userProjects');
+    const request = store.delete(`${userId}_${projectId}`);
+    
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
 }

@@ -1,6 +1,21 @@
 #:schema node_modules/wrangler/config-schema.json
-name = "bolt"
+name = "bolt-iia"
 compatibility_flags = ["nodejs_compat"]
 compatibility_date = "2024-07-01"
 pages_build_output_dir = "./build/client"
 send_metrics = false
+
+[[d1_databases]]
+binding = "DB"
+database_name = "bolt_user_data"
+database_id = "a408a6e4-dc5e-4b18-b715-376fe2ccafc6"
+
+[[env.preview.d1_databases]]
+binding = "DB"
+database_name = "bolt_user_data"
+database_id = "a408a6e4-dc5e-4b18-b715-376fe2ccafc6"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "bolt_user_data"
+database_id = "a408a6e4-dc5e-4b18-b715-376fe2ccafc6"

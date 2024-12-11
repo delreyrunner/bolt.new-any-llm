@@ -36,15 +36,19 @@ export class WorkbenchStore {
   #filesStore = new FilesStore(webcontainer);
   #editorStore = new EditorStore(this.#filesStore);
   #terminalStore = new TerminalStore(webcontainer);
+  #currentUserId: string | null = null;
+  #currentProjectId: string | null = null;
 
   artifacts: Artifacts = import.meta.hot?.data.artifacts ?? map({});
-
   showWorkbench: WritableAtom<boolean> = import.meta.hot?.data.showWorkbench ?? atom(false);
   currentView: WritableAtom<WorkbenchViewType> = import.meta.hot?.data.currentView ?? atom('code');
   unsavedFiles: WritableAtom<Set<string>> = import.meta.hot?.data.unsavedFiles ?? atom(new Set<string>());
   modifiedFiles = new Set<string>();
   artifactIdList: string[] = [];
   #globalExecutionQueue = Promise.resolve();
+  userProjects: WritableAtom<any[]> = atom([]);
+  currentProject: WritableAtom<any | null> = atom(null);
+
   constructor() {
     if (import.meta.hot) {
       import.meta.hot.data.artifacts = this.artifacts;
@@ -52,6 +56,58 @@ export class WorkbenchStore {
       import.meta.hot.data.showWorkbench = this.showWorkbench;
       import.meta.hot.data.currentView = this.currentView;
     }
+  }
+
+  setUserId(userId: string | null) {
+    this.#currentUserId = userId;
+    if (userId) {
+      this.loadUserProjects(userId);
+    } else {
+      this.userProjects.set([]);
+    }
+  }
+
+  getCurrentUserId(): string | null {
+    return this.#currentUserId;
+  }
+
+  async loadUserProjects(userId: string) {
+    const projects = await getProjects();
+    this.userProjects.set(projects);
+  }
+
+  async createProject(name: string): Promise<any> {
+    const projectId = await createProject(name);
+    const currentProjects = this.userProjects.get();
+    this.userProjects.set([...currentProjects, { projectId, name }]);
+    return { projectId, name };
+  }
+
+  async deleteProject(projectId: string): Promise<boolean> {
+    // TO DO: implement delete project API endpoint
+    return false;
+  }
+
+  async setCurrentProject(projectId: string | null) {
+    this.#currentProjectId = projectId;
+    if (!projectId) {
+      this.currentProject.set(null);
+      return;
+    }
+
+    const projects = this.userProjects.get();
+    const project = projects.find(p => p.projectId === projectId);
+    if (project) {
+      this.currentProject.set(project);
+    }
+  }
+
+  async loadProject(projectId: string) {
+    // TO DO: implement load project API endpoint
+  }
+
+  async saveProjectState() {
+    // TO DO: implement save project state API endpoint
   }
 
   addToExecutionQueue(callback: () => Promise<void>) {
@@ -329,6 +385,11 @@ export class WorkbenchStore {
   }
 
   async downloadZip() {
+    if (!this.#currentUserId) {
+      console.warn('No user ID set, cannot download project');
+      return;
+    }
+
     const zip = new JSZip();
     const files = this.files.get();
 
@@ -338,6 +399,13 @@ export class WorkbenchStore {
     // Generate a simple 6-character hash based on the current timestamp
     const timestampHash = Date.now().toString(36).slice(-6);
     const uniqueProjectName = `${projectName}_${timestampHash}`;
+
+    // Create the project in the database before downloading
+    const project = await this.createProject(projectName);
+    if (project) {
+      await this.setCurrentProject(project.projectId);
+      await this.saveProjectState();
+    }
 
     for (const [filePath, dirent] of Object.entries(files)) {
       if (dirent?.type === 'file' && !dirent.isBinary) {
@@ -505,6 +573,29 @@ export class WorkbenchStore {
       throw error; // Rethrow the error for further handling
     }
   }
+}
+
+export async function createProject(name: string) {
+  const response = await fetch('/api/projects', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name })
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to create project');
+  }
+
+  const { id } = await response.json();
+  return id;
+}
+
+export async function getProjects() {
+  const response = await fetch('/api/projects');
+  if (!response.ok) {
+    throw new Error('Failed to fetch projects');
+  }
+  return await response.json();
 }
 
 export const workbenchStore = new WorkbenchStore();

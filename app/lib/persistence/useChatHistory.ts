@@ -17,6 +17,7 @@ import {
 export interface ChatHistoryItem {
   id: string;
   urlId?: string;
+  userId?: string | null;
   description?: string;
   messages: Message[];
   timestamp: string;
@@ -33,6 +34,7 @@ export function useChatHistory() {
   const navigate = useNavigate();
   const { id: mixedId } = useLoaderData<{ id?: string }>();
   const [searchParams] = useSearchParams();
+  const userId = workbenchStore.getCurrentUserId();
 
   const [initialMessages, setInitialMessages] = useState<Message[]>([]);
   const [ready, setReady] = useState<boolean>(false);
@@ -105,7 +107,14 @@ export function useChatHistory() {
         }
       }
 
-      await setMessages(db, chatId.get() as string, messages, urlId, description.get());
+      await setMessages(
+        db,
+        chatId.get() as string,
+        messages,
+        userId,
+        urlId,
+        description.get(),
+      );
     },
     duplicateCurrentChat: async (listItemId: string) => {
       if (!db || (!mixedId && !listItemId)) {
