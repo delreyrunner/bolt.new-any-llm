@@ -1,12 +1,120 @@
-import { type ActionFunctionArgs } from '@remix-run/cloudflare';
+import { type ActionFunctionArgs, type LoaderFunctionArgs } from '@remix-run/cloudflare';
 import { MAX_RESPONSE_SEGMENTS, MAX_TOKENS } from '~/lib/.server/llm/constants';
 import { CONTINUE_PROMPT } from '~/lib/.server/llm/prompts';
 import { streamText, type Messages, type StreamingOptions } from '~/lib/.server/llm/stream-text';
 import SwitchableStream from '~/lib/.server/llm/switchable-stream';
 import { v4 as uuidv4 } from 'uuid';
 
-export async function action(args: ActionFunctionArgs) {
-  return chatAction(args);
+export async function loader({ context, request }: LoaderFunctionArgs) {
+  try {
+    const cloudflare = context.cloudflare as { env?: { DB?: D1Database } };
+
+    if (!cloudflare?.env?.DB) {
+      return new Response(JSON.stringify({ error: 'Database not available' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
+    // Get project_id from query params
+    const url = new URL(request.url);
+    const projectId = url.searchParams.get('project_id');
+
+    if (!projectId) {
+      return new Response(JSON.stringify({ error: 'project_id is required' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
+    // Get all chat history for the project
+    const result = await cloudflare.env.DB
+      .prepare('SELECT * FROM chat_history WHERE project_id = ? ORDER BY created_at DESC')
+      .bind(projectId)
+      .all();
+
+    return new Response(JSON.stringify(result), {
+      headers: { 'Content-Type': 'application/json' }
+    });
+  } catch (error: any) {
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+}
+
+export async function action({ context, request }: ActionFunctionArgs) {
+  if (request.method === 'POST') {
+    try {
+      const cloudflare = context.cloudflare as { env?: { DB?: D1Database } };
+
+      if (!cloudflare?.env?.DB) {
+        return new Response(JSON.stringify({ error: 'Database not available' }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      const body = await request.json();
+      const { project_id, user_id, messages } = body;
+
+      if (!project_id || !user_id || !messages) {
+        return new Response(JSON.stringify({ error: 'project_id, user_id, and messages are required' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      // Check if project exists
+      const project = await cloudflare.env.DB
+        .prepare('SELECT id FROM projects WHERE id = ?')
+        .bind(project_id)
+        .first();
+
+      if (!project) {
+        return new Response(JSON.stringify({ error: 'Project not found' }), {
+          status: 404,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      // Check if user exists
+      const user = await cloudflare.env.DB
+        .prepare('SELECT id FROM users WHERE id = ?')
+        .bind(user_id)
+        .first();
+
+      if (!user) {
+        return new Response(JSON.stringify({ error: 'User not found' }), {
+          status: 404,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      const now = Math.floor(Date.now() / 1000);
+      const id = uuidv4();
+
+      // Store messages as JSON string
+      const messagesJson = JSON.stringify(messages);
+
+      const result = await cloudflare.env.DB
+        .prepare('INSERT INTO chat_history (id, project_id, user_id, messages, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
+        .bind(id, project_id, user_id, messagesJson, now, now)
+        .run();
+
+      return new Response(JSON.stringify({ id, project_id, user_id, messages, created_at: now, updated_at: now }), {
+        headers: { 'Content-Type': 'application/json' }
+      });
+    } catch (error: any) {
+      return new Response(JSON.stringify({ error: error.message }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+  } else {
+    return chatAction({ context, request });
+  }
 }
 
 function parseCookies(cookieHeader: string) {
